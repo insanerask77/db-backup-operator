@@ -1,15 +1,15 @@
 backups:
   - name: postgres-main
     type: postgres
-    host: db-postgres
+    host: postgres
     port: 5432
-    user: backup
-    password: secret
-    database: myapp
+    user: postgres
+    password: postgres
+    database: postgres
     schedule: "0 */6 * * *"
     backup_on_start: true
-    compression: gzip
-    encrypt: true
+    compression: none
+    encrypt: none
     encrypt_key: /keys/public.gpg
     checksum: md5
     retention:
@@ -19,7 +19,7 @@ backups:
       type: pvc
   - name: mongo-analytics
     type: mongo
-    uri: mongodb://backup:secret@mongo:27017/analytics
+    uri: mongodb://root:secret@mongo:27017/analytics
     schedule: "0 0 * * *"
     compression: zstd
     retention:
