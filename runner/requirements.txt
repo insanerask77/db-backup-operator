@@ -1,0 +1,5 @@
+pyyaml
+python-gnupg
+requests
+python-crontab
+flask
