@@ -1,29 +1,15 @@
 version: "3.9"
 services:
-  backend:
-    build: ./backend
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./config:/config
-      - backend-data:/data
-    environment:
-      - RUNNER_URL=http://runner:8000
-      - CONFIG_PATH=/config/config.yaml
-    networks:
-      - default
   runner:
     build: ./runner
     volumes:
       - ./config:/config
       - ./backups:/backups
+      - runner-data:/data
     ports:
-      - 8000:8000
+      - "8080:8000"
     environment:
-      - BACKEND_URL=http://backend:8080
       - CONFIG_PATH=/config/config.yaml
-    depends_on:
-      - backend
     networks:
       - default
   postgres:
@@ -53,6 +39,6 @@ services:
 volumes:
   postgres-data:
   mongo-data:
-  backend-data:
+  runner-data:
 networks:
   default:

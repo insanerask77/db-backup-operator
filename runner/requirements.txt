@@ -2,4 +2,7 @@ pyyaml
 python-gnupg
 requests
 python-crontab
-flask
+fastapi
+uvicorn
+pydantic
+prometheus-client

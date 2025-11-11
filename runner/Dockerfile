@@ -34,4 +34,4 @@ COPY . .
 RUN touch /var/log/cron.log
 
 # Run the command on container startup
-CMD python scheduler.py && /usr/bin/supervisord -c /usr/src/app/supervisord.conf
+CMD ["/usr/bin/supervisord", "-c", "/usr/src/app/supervisord.conf"]

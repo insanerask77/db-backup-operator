@@ -3,15 +3,39 @@ import yaml
 import subprocess
 import hashlib
 import gnupg
-import requests
 from datetime import datetime
 import logging
 import argparse
 import time
+import sqlite3
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# --- Database Setup ---
+DB_FILE = "/data/backups.db"
+os.makedirs("/data", exist_ok=True)
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS backup_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        status TEXT NOT NULL,
+        size REAL,
+        duration REAL,
+        checksum TEXT
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# --- Helper Functions ---
 def get_config():
     """Reads and returns the YAML configuration."""
     config_path = os.environ.get("CONFIG_PATH", "/config/config.yaml")
@@ -26,8 +50,17 @@ def run_command(command):
     logging.info(f"Running command: {' '.join(command)}")
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
+
+    stdout_decoded = stdout.decode('utf-8').strip()
+    stderr_decoded = stderr.decode('utf-8').strip()
+
+    if stdout_decoded:
+        logging.info(f"Command stdout: {stdout_decoded}")
+    if stderr_decoded:
+        logging.warning(f"Command stderr: {stderr_decoded}")
+
     if process.returncode != 0:
-        logging.error(f"Error executing command: {stderr.decode('utf-8')}")
+        logging.error(f"Error executing command: {stderr_decoded}")
         return None
     return stdout
 
@@ -75,44 +108,51 @@ def encrypt_file(filepath, gpg_key_path):
 def apply_retention(backup_dir, retention_policy):
     """Applies the retention policy to backups."""
     if not os.path.exists(backup_dir):
+        logging.info(f"Backup directory {backup_dir} does not exist. Skipping retention.")
         return
 
+    logging.info(f"Applying retention policy for {backup_dir}")
     files = sorted(
         [os.path.join(backup_dir, f) for f in os.listdir(backup_dir)],
         key=os.path.getmtime,
         reverse=True
     )
+    logging.info(f"Found {len(files)} backups in {backup_dir}.")
 
     if 'keep_last' in retention_policy:
-        files_to_delete = files[retention_policy['keep_last']:]
+        keep_last = retention_policy['keep_last']
+        logging.info(f"Retention policy: keep_last = {keep_last}")
+        files_to_delete = files[keep_last:]
     elif 'days' in retention_policy:
-        cutoff = datetime.now().timestamp() - (retention_policy['days'] * 86400)
+        days = retention_policy['days']
+        logging.info(f"Retention policy: days = {days}")
+        cutoff = datetime.now().timestamp() - (days * 86400)
         files_to_delete = [f for f in files if os.path.getmtime(f) < cutoff]
     else:
+        logging.info("No retention policy specified.")
         return
 
+    logging.info(f"Found {len(files_to_delete)} backups to delete.")
     for f in files_to_delete:
         logging.info(f"Deleting old backup: {f}")
         os.remove(f)
 
-def report_status(backend_url, backup_name, status, size, duration, checksum):
-    """Reports the backup status to the backend."""
-    try:
-        requests.post(f"{backend_url}/api/backups/history/{backup_name}", json={
-            "status": status,
-            "size": size,
-            "duration": duration,
-            "checksum": checksum,
-            "timestamp": datetime.now().isoformat()
-        })
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to report status to backend: {e}")
+def report_status(backup_name, status, size, duration, checksum):
+    """Reports the backup status to the database."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO backup_history (name, timestamp, status, size, duration, checksum) VALUES (?, ?, ?, ?, ?, ?)",
+        (backup_name, datetime.now().isoformat(), status, size, duration, checksum)
+    )
+    conn.commit()
+    conn.close()
 
 def run_backup(name, config):
     """Runs a single backup job."""
     logging.info(f"Starting backup for {name}")
     start_time = time.time()
-    backup_dir = config['storage']['path']
+    backup_dir = os.path.join(config['storage']['path'], name)
     os.makedirs(backup_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
 
@@ -135,6 +175,7 @@ def run_backup(name, config):
         filepath = os.path.join(backup_dir, filename)
         command = [
             'mongodump',
+            '-vv',
             '--uri', config['uri'],
             '--archive=' + filepath
         ]
@@ -145,7 +186,7 @@ def run_backup(name, config):
 
     if not os.path.exists(filepath):
         logging.error("Backup file was not created.")
-        report_status(os.environ.get("BACKEND_URL"), name, "failed", 0, time.time() - start_time, None)
+        report_status(name, "failed", 0, time.time() - start_time, None)
         return
 
     # Compress
@@ -166,7 +207,7 @@ def run_backup(name, config):
     # Report status
     duration = time.time() - start_time
     size = os.path.getsize(filepath)
-    report_status(os.environ.get("BACKEND_URL"), name, "success", size, duration, checksum)
+    report_status(name, "success", size, duration, checksum)
     logging.info(f"Backup for {name} completed successfully.")
 
 def main():
