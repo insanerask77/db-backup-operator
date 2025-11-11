@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   backup-runner:
+    init: true
     build:
       context: .
     container_name: backup-runner
