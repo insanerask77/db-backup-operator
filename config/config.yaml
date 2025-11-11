@@ -8,22 +8,18 @@ backups:
     database: postgres
     schedule: "0 */6 * * *"
     backup_on_start: true
-    compression: none
-    encrypt: none
-    encrypt_key: /keys/public.gpg
+    compression: gzip
     checksum: md5
     retention:
-      keep_last: 30
+      keep_last: 3
     storage:
-      path: /backups/postgres
-      type: pvc
-  - name: mongo-analytics
+      path: /backups
+  - name: mongo
     type: mongo
-    uri: mongodb://root:secret@mongo:27017/analytics
+    uri: mongodb://root:secret@mongo:27017/analytics?authSource=admin
     schedule: "0 0 * * *"
     compression: zstd
     retention:
       days: 14
     storage:
-      path: /backups/mongo
-      type: nfs
+      path: /backups

@@ -3,7 +3,8 @@ import os
 from crontab import CronTab
 import logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_config():
     """Reads and returns the YAML configuration."""

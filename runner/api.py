@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 import subprocess
 from typing import List, Dict, Any
@@ -6,8 +6,15 @@ from prometheus_client import Gauge, make_asgi_app
 import sqlite3
 import os
 import yaml
+import logging
+from datetime import datetime
+from fastapi.responses import FileResponse
 
-from runner import get_config
+from runner import get_config, calculate_checksum
+
+# Configure logging
+log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- FastAPI App ---
 app = FastAPI()
@@ -23,6 +30,26 @@ app.mount("/metrics", metrics_app)
 
 # --- Database Setup ---
 DB_FILE = "/data/backups.db"
+os.makedirs("/data", exist_ok=True)
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS backup_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        status TEXT NOT NULL,
+        size REAL,
+        duration REAL,
+        checksum TEXT
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
 
 # --- Pydantic Models ---
 class BackupHistory(BaseModel):
@@ -31,6 +58,12 @@ class BackupHistory(BaseModel):
     status: str
     size: float
     duration: float
+    checksum: str
+
+class BackupFile(BaseModel):
+    name: str
+    size: int
+    modified: str
     checksum: str
 
 # --- API Endpoints ---
@@ -43,16 +76,37 @@ def get_backups() -> List[Dict[str, Any]]:
 def run_backup_endpoint(name: str):
     """Triggers an on-demand backup."""
     try:
-        subprocess.Popen(['python', '/usr/src/app/runner.py', name])
+        subprocess.Popen(['python', '/usr/src/app/runner.py', 'backup', name])
         return {'status': 'Backup started'}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/backups/restore/{name}")
-def restore_backup(name: str):
-    # This is a placeholder for the restore functionality
-    return {"message": f"Restore for {name} is not yet implemented."}
+def restore_backup(name: str, file: str = Query(None)):
+    """Triggers an on-demand restore."""
+    config = get_config()
+    backup_config = next((b for b in config.get('backups', []) if b['name'] == name), None)
+    if not backup_config:
+        raise HTTPException(status_code=404, detail="Backup config not found.")
+
+    if not file:
+        backup_dir = os.path.join(backup_config['storage']['path'], name)
+        if not os.path.exists(backup_dir):
+            raise HTTPException(status_code=404, detail="Backup directory not found.")
+        files = sorted(
+            [os.path.join(backup_dir, f) for f in os.listdir(backup_dir)],
+            key=os.path.getmtime,
+            reverse=True
+        )
+        if not files:
+            raise HTTPException(status_code=404, detail="No backup files found.")
+        file = files[0]
+
+    try:
+        subprocess.Popen(['python', '/usr/src/app/runner.py', 'restore', name, '--file', file])
+        return {'status': f'Restore started from {file}'}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/backups/history/{name}")
 def get_backup_history(name: str) -> List[BackupHistory]:
@@ -91,6 +145,43 @@ def record_backup_history(name: str, history_entry: BackupHistory):
         backup_duration_seconds.labels(db=name, type=db_type).set(history_entry.duration)
 
     return {"message": "History recorded."}
+
+@app.get("/api/backups/files/{name}", response_model=List[BackupFile])
+def list_backup_files(name: str):
+    config = get_config()
+    backup_config = next((b for b in config.get('backups', []) if b['name'] == name), None)
+    if not backup_config:
+        raise HTTPException(status_code=404, detail="Backup config not found.")
+
+    backup_dir = os.path.join(backup_config['storage']['path'], name)
+    if not os.path.exists(backup_dir):
+        return []
+
+    files = []
+    for f in os.listdir(backup_dir):
+        filepath = os.path.join(backup_dir, f)
+        files.append(
+            BackupFile(
+                name=f,
+                size=os.path.getsize(filepath),
+                modified=datetime.fromtimestamp(os.path.getmtime(filepath)).isoformat(),
+                checksum=calculate_checksum(filepath)
+            )
+        )
+    return files
+
+@app.get("/api/backups/download/{name}/{filename}")
+def download_backup_file(name: str, filename: str):
+    config = get_config()
+    backup_config = next((b for b in config.get('backups', []) if b['name'] == name), None)
+    if not backup_config:
+        raise HTTPException(status_code=404, detail="Backup config not found.")
+
+    filepath = os.path.join(backup_config['storage']['path'], name, filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    return FileResponse(filepath, media_type='application/octet-stream', filename=filename)
 
 @app.post("/api/config/reload")
 def reload_config():

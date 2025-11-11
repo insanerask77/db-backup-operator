@@ -10,30 +10,11 @@ import time
 import sqlite3
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Database Setup ---
 DB_FILE = "/data/backups.db"
-os.makedirs("/data", exist_ok=True)
-
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS backup_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        timestamp TEXT NOT NULL,
-        status TEXT NOT NULL,
-        size REAL,
-        duration REAL,
-        checksum TEXT
-    )
-    """)
-    conn.commit()
-    conn.close()
-
-init_db()
 
 # --- Helper Functions ---
 def get_config():
@@ -84,8 +65,21 @@ def compress_file(filepath, compression='gzip'):
         return filepath
     return compressed_filepath
 
-def encrypt_file(filepath, gpg_key_path):
-    """Encrypts a file using GPG."""
+def decompress_file(filepath):
+    """Decompresses a file."""
+    if filepath.endswith('.gz'):
+        decompressed_filepath = filepath[:-3]
+        run_command(['gunzip', '-f', filepath])
+    elif filepath.endswith('.zst'):
+        decompressed_filepath = filepath[:-4]
+        run_command(['zstd', '-d', '-f', filepath])
+    else:
+        return filepath
+    return decompressed_filepath
+
+
+def decrypt_file(filepath, gpg_key_path):
+    """Decrypts a file using GPG."""
     gpg = gnupg.GPG()
     # Import the key
     with open(gpg_key_path, 'r') as f:
@@ -95,15 +89,13 @@ def encrypt_file(filepath, gpg_key_path):
         logging.error(f"Failed to import GPG key from {gpg_key_path}")
         return None
 
-    key_fingerprint = import_result.results[0]['fingerprint']
-
+    decrypted_filepath = filepath[:-4]
     with open(filepath, 'rb') as f:
-        status = gpg.encrypt_file(f, recipients=[key_fingerprint], output=f"{filepath}.gpg", always_trust=True)
+        status = gpg.decrypt_file(f, output=decrypted_filepath)
     if not status.ok:
-        logging.error(f"GPG encryption failed: {status.stderr}")
+        logging.error(f"GPG decryption failed: {status.stderr}")
         return None
-    os.remove(filepath)
-    return f"{filepath}.gpg"
+    return decrypted_filepath
 
 def apply_retention(backup_dir, retention_policy):
     """Applies the retention policy to backups."""
@@ -193,10 +185,6 @@ def run_backup(name, config):
     if 'compression' in config:
         filepath = compress_file(filepath, config['compression'])
 
-    # Encrypt
-    if config.get('encrypt'):
-        filepath = encrypt_file(filepath, config['encrypt_key'])
-
     # Checksum
     checksum = calculate_checksum(filepath, config.get('checksum', 'md5'))
 
@@ -210,10 +198,46 @@ def run_backup(name, config):
     report_status(name, "success", size, duration, checksum)
     logging.info(f"Backup for {name} completed successfully.")
 
+def run_restore(name, config, filepath):
+    """Runs a single restore job."""
+    logging.info(f"Starting restore for {name} from {filepath}")
+
+    # Decompress
+    if 'compression' in config:
+        filepath = decompress_file(filepath)
+
+    # Run restore command
+    if config['type'] == 'postgres':
+        os.environ['PGPASSWORD'] = config['password']
+        command = [
+            'psql',
+            '-h', config['host'],
+            '-p', str(config['port']),
+            '-U', config['user'],
+            '-d', config['database'],
+            '-f', filepath  # <- ejecuta el SQL directamente
+        ]
+        run_command(command)
+    elif config['type'] == 'mongo':
+        command = [
+            'mongorestore',
+            '--uri', config['uri'],
+            '--archive=' + filepath,
+            '--drop'
+        ]
+        run_command(command)
+    else:
+        logging.error(f"Unknown backup type: {config['type']}")
+        return
+
+    logging.info(f"Restore for {name} completed successfully.")
+
 def main():
-    """Main function to run a single backup."""
-    parser = argparse.ArgumentParser(description="Run a single backup job.")
-    parser.add_argument("backup_name", help="The name of the backup to run.")
+    """Main function to run a single backup or restore."""
+    parser = argparse.ArgumentParser(description="Run a single backup or restore job.")
+    parser.add_argument("action", choices=['backup', 'restore'], help="The action to perform.")
+    parser.add_argument("backup_name", help="The name of the backup config to use.")
+    parser.add_argument("--file", help="The file to restore from (for restore action only).")
     args = parser.parse_args()
 
     config = get_config()
@@ -225,7 +249,13 @@ def main():
         logging.error(f"Backup '{args.backup_name}' not found in config.")
         return
 
-    run_backup(backup_config['name'], backup_config)
+    if args.action == 'backup':
+        run_backup(backup_config['name'], backup_config)
+    elif args.action == 'restore':
+        if not args.file:
+            logging.error("The --file argument is required for the restore action.")
+            return
+        run_restore(backup_config['name'], backup_config, args.file)
 
 if __name__ == "__main__":
     main()
