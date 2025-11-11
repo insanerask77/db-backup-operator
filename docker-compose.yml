@@ -1,31 +1,11 @@
-version: "3.9"
+version: '3.8'
+
 services:
-  backend:
-    build: ./backend
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./config:/config
-      - backend-data:/data
-    environment:
-      - RUNNER_URL=http://runner:8000
-      - CONFIG_PATH=/config/config.yaml
-  runner:
-    build: ./runner
+  backup-runner:
+    build:
+      context: .
+    container_name: backup-runner
     volumes:
       - ./config:/config
       - ./backups:/backups
-    environment:
-      - BACKEND_URL=http://backend:8080
-      - CONFIG_PATH=/config/config.yaml
-    depends_on:
-      - backend
-  frontend:
-    build: ./frontend
-    ports:
-      - "3000:80"
-    depends_on:
-      - backend
-
-volumes:
-  backend-data:
+    restart: always
