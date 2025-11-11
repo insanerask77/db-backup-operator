@@ -77,26 +77,6 @@ def decompress_file(filepath):
         return filepath
     return decompressed_filepath
 
-def encrypt_file(filepath, gpg_key_path):
-    """Encrypts a file using GPG."""
-    gpg = gnupg.GPG()
-    # Import the key
-    with open(gpg_key_path, 'r') as f:
-        key_data = f.read()
-    import_result = gpg.import_keys(key_data)
-    if not import_result.results:
-        logging.error(f"Failed to import GPG key from {gpg_key_path}")
-        return None
-
-    key_fingerprint = import_result.results[0]['fingerprint']
-
-    with open(filepath, 'rb') as f:
-        status = gpg.encrypt_file(f, recipients=[key_fingerprint], output=f"{filepath}.gpg", always_trust=True)
-    if not status.ok:
-        logging.error(f"GPG encryption failed: {status.stderr}")
-        return None
-    os.remove(filepath)
-    return f"{filepath}.gpg"
 
 def decrypt_file(filepath, gpg_key_path):
     """Decrypts a file using GPG."""
@@ -205,10 +185,6 @@ def run_backup(name, config):
     if 'compression' in config:
         filepath = compress_file(filepath, config['compression'])
 
-    # Encrypt
-    if config.get('encrypt'):
-        filepath = encrypt_file(filepath, config['encrypt_key'])
-
     # Checksum
     checksum = calculate_checksum(filepath, config.get('checksum', 'md5'))
 
@@ -226,10 +202,6 @@ def run_restore(name, config, filepath):
     """Runs a single restore job."""
     logging.info(f"Starting restore for {name} from {filepath}")
 
-    # Decrypt
-    if config.get('encrypt'):
-        filepath = decrypt_file(filepath, config['encrypt_key'])
-
     # Decompress
     if 'compression' in config:
         filepath = decompress_file(filepath)
@@ -238,14 +210,12 @@ def run_restore(name, config, filepath):
     if config['type'] == 'postgres':
         os.environ['PGPASSWORD'] = config['password']
         command = [
-            'pg_restore',
+            'psql',
             '-h', config['host'],
             '-p', str(config['port']),
             '-U', config['user'],
             '-d', config['database'],
-            '--clean',
-            '--if-exists',
-            filepath
+            '-f', filepath  # <- ejecuta el SQL directamente
         ]
         run_command(command)
     elif config['type'] == 'mongo':
