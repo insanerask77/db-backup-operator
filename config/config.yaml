@@ -10,6 +10,9 @@ databases:
     password: postgres_password
     dbname: my_database
     cron_schedule: "0 2 * * *" # At 02:00 every day
+    compression: gz # Options: gz, zip, none
+    retention:
+      keep_last: 10 # Keep the last 10 backups
 
   - name: my_mongo_db
     type: mongodb
@@ -19,3 +22,6 @@ databases:
     password: mongo_password
     dbname: my_mongo_database
     cron_schedule: "0 3 * * *" # At 03:00 every day
+    compression: zip # Options: gz, zip, none
+    retention:
+      keep_days: 30 # Keep backups for the last 30 days

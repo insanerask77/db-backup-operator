@@ -8,7 +8,8 @@ RUN apk update && apk add --no-cache \
     mongodb-tools \
     yq \
     dcron \
-    coreutils
+    coreutils \
+    zip
 
 # Create a directory for the application
 WORKDIR /app
