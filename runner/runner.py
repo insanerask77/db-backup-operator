@@ -133,22 +133,31 @@ def encrypt_file(filepath, gpg_key_path):
 def apply_retention(backup_dir, retention_policy):
     """Applies the retention policy to backups."""
     if not os.path.exists(backup_dir):
+        logging.info(f"Backup directory {backup_dir} does not exist. Skipping retention.")
         return
 
+    logging.info(f"Applying retention policy for {backup_dir}")
     files = sorted(
         [os.path.join(backup_dir, f) for f in os.listdir(backup_dir)],
         key=os.path.getmtime,
         reverse=True
     )
+    logging.info(f"Found {len(files)} backups in {backup_dir}.")
 
     if 'keep_last' in retention_policy:
-        files_to_delete = files[retention_policy['keep_last']:]
+        keep_last = retention_policy['keep_last']
+        logging.info(f"Retention policy: keep_last = {keep_last}")
+        files_to_delete = files[keep_last:]
     elif 'days' in retention_policy:
-        cutoff = datetime.now().timestamp() - (retention_policy['days'] * 86400)
+        days = retention_policy['days']
+        logging.info(f"Retention policy: days = {days}")
+        cutoff = datetime.now().timestamp() - (days * 86400)
         files_to_delete = [f for f in files if os.path.getmtime(f) < cutoff]
     else:
+        logging.info("No retention policy specified.")
         return
 
+    logging.info(f"Found {len(files_to_delete)} backups to delete.")
     for f in files_to_delete:
         logging.info(f"Deleting old backup: {f}")
         os.remove(f)
@@ -168,7 +177,7 @@ def run_backup(name, config):
     """Runs a single backup job."""
     logging.info(f"Starting backup for {name}")
     start_time = time.time()
-    backup_dir = config['storage']['path']
+    backup_dir = os.path.join(config['storage']['path'], name)
     os.makedirs(backup_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
 
@@ -191,6 +200,7 @@ def run_backup(name, config):
         filepath = os.path.join(backup_dir, filename)
         command = [
             'mongodump',
+            '-vv',
             '--uri', config['uri'],
             '--archive=' + filepath
         ]
