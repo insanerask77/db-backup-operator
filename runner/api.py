@@ -6,8 +6,13 @@ from prometheus_client import Gauge, make_asgi_app
 import sqlite3
 import os
 import yaml
+import logging
 
 from runner import get_config
+
+# Configure logging
+log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- FastAPI App ---
 app = FastAPI()

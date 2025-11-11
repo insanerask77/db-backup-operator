@@ -73,3 +73,9 @@ This document provides an overview of the Backup Runner API endpoints.
     "status": "Configuration reloaded"
   }
   ```
+
+## Configuration
+
+### Environment Variables
+
+- `LOG_LEVEL`: Sets the logging level for the application. Defaults to `INFO`. Possible values are `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.

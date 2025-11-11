@@ -13,9 +13,9 @@ backups:
     encrypt_key: /keys/public.gpg
     checksum: md5
     retention:
-      keep_last: 30
+      keep_last: 3
     storage:
-      path: /backups/postgres
+      path: /backups
       type: pvc
   - name: mongo-analytics
     type: mongo
