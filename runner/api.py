@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 import subprocess
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from prometheus_client import Gauge, make_asgi_app
 import sqlite3
 import os
@@ -58,7 +58,14 @@ class BackupHistory(BaseModel):
     status: str
     size: float
     duration: float
-    checksum: str
+    checksum: Optional[str]
+
+class BackupHistoryIn(BaseModel):
+    timestamp: str
+    status: str
+    size: float
+    duration: float
+    checksum: Optional[str]
 
 class BackupFile(BaseModel):
     name: str
@@ -121,7 +128,7 @@ def get_backup_history(name: str) -> List[BackupHistory]:
     return history
 
 @app.post("/api/backups/history/{name}")
-def record_backup_history(name: str, history_entry: BackupHistory):
+def record_backup_history(name: str, history_entry: BackupHistoryIn):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute(
